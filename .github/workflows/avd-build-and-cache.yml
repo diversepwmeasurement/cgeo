@@ -1,58 +1,56 @@
-name: Build AVD cache
-
-on:
-  schedule:
-    - cron:  '0 10 * * *'
-  workflow_dispatch: 
-    inputs:
-      JDK_VERSION:
-        description: The JDK version to use
-        type: number
-        default: 11
-
 env:
   JDK_VERSION: ${{ inputs.JDK_VERSION || '11' }}
-
 jobs:
   avd-cache-update:
-    # > It is now recommended to use the Ubuntu (ubuntu-latest) runners which
-    # > are 2-3 times faster than the macOS ones which are also a lot more expensive.
-    # https://github.com/ReactiveCircus/android-emulator-runner#running-hardware-accelerated-emulators-on-linux-runners
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    steps:
+    - continue-on-error: true
+      name: Enable KVM group perms
+      run: 'echo ''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"''
+        | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+
+        sudo udevadm control --reload-rules
+
+        sudo udevadm trigger --name-match=kvm
+
+        '
+    - continue-on-error: true
+      name: Set up JDK ${{ env.JDK_VERSION }}
+      uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: ${{ env.JDK_VERSION }}
+    - continue-on-error: true
+      id: avd-cache
+      name: AVD cache
+      uses: actions/cache@v4
+      with:
+        key: avd-${{ matrix.api-level }}
+        path: '~/.android/avd/*
+
+          ~/.android/adb*
+
+          '
+    - continue-on-error: true
+      if: steps.avd-cache.outputs.cache-hit != 'true'
+      name: create AVD and generate snapshot for caching
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api-level }}
+        arch: x86_64
+        disable-animations: false
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          -camera-back none
+        force-avd-creation: false
+        script: echo "Generated AVD snapshot for caching."
+        target: google_apis
     strategy:
       matrix:
-        api-level: [26, 29, 30]
-    steps:
-      # https://github.blog/changelog/2023-02-23-hardware-accelerated-android-virtualization-on-actions-windows-and-linux-larger-hosted-runners/
-      - name: Enable KVM group perms
-        run: |
-            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-            sudo udevadm control --reload-rules
-            sudo udevadm trigger --name-match=kvm
-
-      - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v3
-        with:
-          java-version: ${{ env.JDK_VERSION }}
-          distribution: temurin
-
-      - name: AVD cache
-        uses: actions/cache@v4
-        id: avd-cache
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-${{ matrix.api-level }}
-
-      - name: create AVD and generate snapshot for caching
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api-level }}
-          target: google_apis
-          arch: x86_64
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
+        api-level:
+        - 26
+        - 29
+        - 30
+name: Build AVD cache
+on:
+  repository_dispatch:
+    types: trigger-ga___avd-build-and-cache.yml
